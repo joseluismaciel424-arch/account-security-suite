@@ -1,0 +1,18 @@
+{
+  "name": "account-security-suite",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @account-security-suite/web",
+    "dev:api": "npm run dev --workspace @account-security-suite/api",
+    "dev:web": "npm run dev --workspace @account-security-suite/web",
+    "build": "npm run build --workspace @account-security-suite/web && npm run build --workspace @account-security-suite/api",
+    "lint": "npm run lint --workspace @account-security-suite/web && npm run lint --workspace @account-security-suite/api",
+    "check": "npm run typecheck --workspace @account-security-suite/web && npm run typecheck --workspace @account-security-suite/api"
+  },
+  "packageManager": "npm@10.8.1"
+}
