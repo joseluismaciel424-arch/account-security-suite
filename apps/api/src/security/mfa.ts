@@ -19,7 +19,8 @@ export const generateMfaSecret = () => {
 
   let result = '';
   for (let index = 0; index < bits.length; index += 5) {
-    result += BASE32_ALPHABET[Number.parseInt(bits.slice(index, index + 5).padEnd(5, '0'), 2)];
+    const value = Number.parseInt(bits.slice(index, index + 5).padEnd(5, '0'), 2);
+    result += BASE32_ALPHABET[value];
   }
   return result;
 };
@@ -27,6 +28,7 @@ export const generateMfaSecret = () => {
 const decodeBase32 = (value: string) => {
   const normalized = value.replace(/=+$/g, '').replace(/\s+/g, '').toUpperCase();
   let bits = '';
+
   for (const character of normalized) {
     const index = BASE32_ALPHABET.indexOf(character);
     if (index < 0) throw new Error('Invalid TOTP secret.');
@@ -37,6 +39,7 @@ const decodeBase32 = (value: string) => {
   for (let index = 0; index + 8 <= bits.length; index += 8) {
     bytes.push(Number.parseInt(bits.slice(index, index + 8), 2));
   }
+
   return Buffer.from(bytes);
 };
 
@@ -53,18 +56,20 @@ const codeForCounter = (secret: string, counter: number) => {
 };
 
 export const verifyTotpCode = (secret: string, code: string) => {
-  if (!/^[0-9]{6}$/.test(code.trim())) return false;
+  if (!secret || !/^[0-9]{6}$/.test(code.trim())) return false;
   const counter = Math.floor(Date.now() / 1000 / TOTP_STEP_SECONDS);
-  return [-1, 0, 1].some((offset) =>
-    crypto.timingSafeEqual(Buffer.from(code.trim()), Buffer.from(codeForCounter(secret, counter + offset))),
-  );
+  return [-1, 0, 1].some((offset) => {
+    const token = codeForCounter(secret, counter + offset);
+    return crypto.timingSafeEqual(Buffer.from(token), Buffer.from(code.trim()));
+  });
 };
 
 export const encryptMfaSecret = (secret: string) => {
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv('aes-256-gcm', encryptionKey(), iv);
   const ciphertext = Buffer.concat([cipher.update(secret, 'utf8'), cipher.final()]);
-  return `${iv.toString('hex')}:${cipher.getAuthTag().toString('hex')}:${ciphertext.toString('hex')}`;
+  const tag = cipher.getAuthTag();
+  return `${iv.toString('hex')}:${tag.toString('hex')}:${ciphertext.toString('hex')}`;
 };
 
 export const decryptMfaSecret = (payload: string) => {
@@ -76,4 +81,4 @@ export const decryptMfaSecret = (payload: string) => {
 };
 
 export const generateRecoveryCodes = (count = 10) =>
-  Array.from({ length: count }, () => crypto.randomBytes(5).toString('hex').toUpperCase());
+  Array.from({ length: count }, () => crypto.randomBytes(4).toString('hex').toUpperCase());
