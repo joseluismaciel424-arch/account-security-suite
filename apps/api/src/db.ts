@@ -17,6 +17,7 @@ export const initDatabase = async () => {
       email TEXT NOT NULL UNIQUE,
       password_hash TEXT NOT NULL,
       mfa_enabled BOOLEAN NOT NULL DEFAULT false,
+      mfa_secret TEXT,
       recovery_email TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
