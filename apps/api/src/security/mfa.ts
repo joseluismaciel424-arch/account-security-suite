@@ -4,14 +4,32 @@ export const generateMfaSecret = () => crypto.randomBytes(20).toString('hex');
 
 export const verifyTotpCode = (secret: string, code: string) => {
   const normalized = secret.trim();
-  const digits = Array.from({ length: 6 }, (_, index) => {
-    const timeWindow = Math.floor(Date.now() / 30000);
-    const value = BigInt(`0x${crypto
-      .createHmac('sha1', normalized)
-      .update(Buffer.from(String(timeWindow + index - 1), 'utf8'))
-      .digest('hex')}`);
-    return Number(value & BigInt(0x7fffffff)) % 1000000;
-  });
+  if (!normalized || !/^[0-9]{6}$/.test(code.trim())) {
+    return false;
+  }
 
-  return digits.some((value) => value.toString().padStart(6, '0') === code.trim());
+  const windowSize = 2;
+  const currentTime = Math.floor(Date.now() / 30000);
+  const enteredCode = code.trim();
+
+  for (let offset = -windowSize; offset <= windowSize; offset += 1) {
+    const counter = currentTime + offset;
+    const hash = crypto
+      .createHmac('sha1', normalized)
+      .update(Buffer.from(String(counter), 'utf8'))
+      .digest();
+
+    const offsetValue = hash[hash.length - 1] & 0x0f;
+    const binary = ((hash[offsetValue] & 0x7f) << 24) |
+      ((hash[offsetValue + 1] & 0xff) << 16) |
+      ((hash[offsetValue + 2] & 0xff) << 8) |
+      (hash[offsetValue + 3] & 0xff);
+
+    const otp = binary % 1000000;
+    if (otp.toString().padStart(6, '0') === enteredCode) {
+      return true;
+    }
+  }
+
+  return false;
 };

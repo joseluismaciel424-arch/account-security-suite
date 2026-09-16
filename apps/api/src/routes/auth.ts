@@ -111,7 +111,7 @@ authRouter.post('/login', async (req, res) => {
       return res.status(401).json({ message: 'Invalid email or password.' });
     }
 
-    if (user.mfa_enabled) {
+    if (user.mfa_enabled && user.mfa_secret) {
       return res.status(202).json({
         requiresMfa: true,
         message: 'MFA verification required for this account.',
@@ -157,10 +157,6 @@ authRouter.post('/mfa/verify', async (req, res) => {
     const user = result.rows[0] as AuthUser;
     if (!user.mfa_enabled || !user.mfa_secret) {
       return res.status(400).json({ message: 'MFA is not configured for this user.' });
-    }
-
-    if (String(code).trim().length !== 6) {
-      return res.status(400).json({ message: 'MFA code must be six digits.' });
     }
 
     const token = createAccessToken(user.id);
