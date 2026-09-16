@@ -1,7 +1,11 @@
+import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 
 const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-secret-change-me';
+
+export const hashToken = (token: string) =>
+  crypto.createHash('sha256').update(token).digest('hex');
 
 export const isStrongPassword = (password: string) => {
   if (password.length < 12) return false;

@@ -7,32 +7,45 @@ securityRouter.use(requireAuth);
 
 securityRouter.get('/summary', async (req, res) => {
   try {
-    const [events, sessions] = await Promise.all([
+    const userId = req.user!.id;
+
+    const [userResult, eventsResult, sessionsResult] = await Promise.all([
       pool.query(
-        `SELECT id, event_type, severity, title, description, metadata, created_at, resolved
-         FROM security_events
-         WHERE user_id = $1 AND resolved = false
-         ORDER BY created_at DESC LIMIT 25`,
-        [req.user!.id],
+        'SELECT mfa_enabled, recovery_email FROM users WHERE id = $1',
+        [userId],
       ),
       pool.query(
-        `SELECT id, device_name, user_agent, ip_address, mfa_verified, created_at, last_seen_at, expires_at
-         FROM sessions
-         WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > NOW()
+        `SELECT id, event_type, severity, title, description, metadata, created_at, resolved
+         FROM security_events WHERE user_id = $1 ORDER BY created_at DESC LIMIT 25`,
+        [userId],
+      ),
+      pool.query(
+        `SELECT id, device_name, user_agent, ip_address, mfa_verified, last_seen_at
+         FROM sessions WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > NOW()
          ORDER BY last_seen_at DESC`,
-        [req.user!.id],
+        [userId],
       ),
     ]);
 
-    const criticalCount = events.rows.filter((event) => event.severity === 'critical').length;
-    const highCount = events.rows.filter((event) => event.severity === 'high').length;
+    const user = userResult.rows[0] ?? { mfa_enabled: false, recovery_email: null };
+    const events = eventsResult.rows;
+    const sessions = sessionsResult.rows;
+    const unresolvedCount = events.filter((event) => !event.resolved).length;
+    const criticalCount = events.filter((event) => event.severity === 'critical').length;
+    const highCount = events.filter((event) => event.severity === 'high').length;
+
+    const score = Math.max(0, 100 - unresolvedCount * 12 - (user.mfa_enabled ? 0 : 16) - (user.recovery_email ? 0 : 8));
+    const status = criticalCount > 0 ? 'critical' : highCount > 0 ? 'needs-attention' : unresolvedCount > 0 ? 'needs-attention' : 'secure';
 
     return res.json({
-      status: criticalCount > 0 ? 'critical' : highCount > 0 ? 'needs-attention' : 'secure',
-      unresolvedEventCount: events.rowCount ?? 0,
-      activeSessionCount: sessions.rowCount ?? 0,
-      events: events.rows,
-      sessions: sessions.rows,
+      status,
+      score,
+      mfaEnabled: Boolean(user.mfa_enabled),
+      recoveryEmailConfigured: Boolean(user.recovery_email),
+      unresolvedEventCount: unresolvedCount,
+      activeSessionCount: sessions.length,
+      events,
+      sessions,
     });
   } catch (error) {
     console.error('Security summary error:', error);
@@ -41,19 +54,13 @@ securityRouter.get('/summary', async (req, res) => {
 });
 
 securityRouter.get('/events', async (req, res) => {
-  const limit = Math.min(Math.max(Number(req.query.limit) || 25, 1), 100);
-
   try {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 25, 1), 100);
     const result = await pool.query(
-      `SELECT id, event_type, severity, title, description, metadata, ip_address,
-              user_agent, created_at, resolved, resolved_at
-       FROM security_events
-       WHERE user_id = $1
-       ORDER BY created_at DESC
-       LIMIT $2`,
+      `SELECT id, event_type, severity, title, description, metadata, created_at, resolved
+       FROM security_events WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2`,
       [req.user!.id, limit],
     );
-
     return res.json({ events: result.rows });
   } catch (error) {
     console.error('Security events error:', error);
@@ -64,10 +71,8 @@ securityRouter.get('/events', async (req, res) => {
 securityRouter.post('/events/:eventId/resolve', async (req, res) => {
   try {
     const result = await pool.query(
-      `UPDATE security_events
-       SET resolved = true, resolved_at = NOW()
-       WHERE id = $1 AND user_id = $2
-       RETURNING id, resolved, resolved_at`,
+      `UPDATE security_events SET resolved = true, resolved_at = NOW()
+       WHERE id = $1 AND user_id = $2 RETURNING id, resolved, resolved_at`,
       [req.params.eventId, req.user!.id],
     );
 
@@ -77,7 +82,7 @@ securityRouter.post('/events/:eventId/resolve', async (req, res) => {
 
     return res.json({ event: result.rows[0] });
   } catch (error) {
-    console.error('Resolve security event error:', error);
+    console.error('Resolve event error:', error);
     return res.status(500).json({ message: 'Unable to resolve security event.' });
   }
 });
