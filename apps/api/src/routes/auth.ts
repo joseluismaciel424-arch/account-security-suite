@@ -1,6 +1,6 @@
 import express from 'express';
 import { pool } from '../db';
-import { createAccessToken, hashPassword, hashToken, isStrongPassword, verifyPassword } from '../security/auth';
+import { createAccessToken, hashPassword, hashToken, isStrongPassword, verifyPassword, verifyToken } from '../security/auth';
 
 export type AuthUser = {
   id: string;
@@ -174,5 +174,35 @@ authRouter.post('/mfa/verify', async (req, res) => {
   } catch (error) {
     console.error('MFA verification error:', error);
     return res.status(500).json({ message: 'Unable to verify MFA code.' });
+  }
+});
+
+authRouter.post('/logout', async (req, res) => {
+  const authorization = req.headers.authorization;
+
+  if (!authorization || !authorization.startsWith('Bearer ')) {
+    return res.status(401).json({ message: 'Authentication required.' });
+  }
+
+  const token = authorization.replace('Bearer ', '').trim();
+
+  try {
+    const payload = verifyToken(token);
+    const hash = hashToken(token);
+    const result = await pool.query(
+      `UPDATE sessions
+       SET revoked_at = NOW(), last_seen_at = NOW()
+       WHERE token_hash = $1 AND user_id = $2 AND revoked_at IS NULL
+       RETURNING id`,
+      [hash, payload.sub],
+    );
+
+    if (!result.rowCount || result.rowCount === 0) {
+      return res.status(404).json({ message: 'No active session found to revoke.' });
+    }
+
+    return res.status(200).json({ message: 'Session revoked successfully.' });
+  } catch {
+    return res.status(401).json({ message: 'Invalid or expired token.' });
   }
 });

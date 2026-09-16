@@ -34,6 +34,11 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
       return res.status(401).json({ message: 'Invalid or expired session.' });
     }
 
+    await pool.query(
+      `UPDATE sessions SET last_seen_at = NOW() WHERE token_hash = $1 AND revoked_at IS NULL`,
+      [tokenHash],
+    );
+
     req.user = { id: String(sessionResult.rows[0].user_id) };
     return next();
   } catch {

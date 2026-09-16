@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
 import { APP_NAME } from '@account-security-suite/shared';
+import { useCallback, useEffect, useState } from 'react';
 
 type SecurityEvent = {
   id: string;
@@ -37,11 +37,14 @@ export default function HomePage() {
   const [summary, setSummary] = useState<SecuritySummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
 
   const loadSummary = useCallback(async () => {
     const token = window.localStorage.getItem('accessToken');
     if (!token) {
-      setError('Inicia sesión para consultar el estado de seguridad de tu cuenta.');
+      setSummary(null);
       setLoading(false);
       return;
     }
@@ -54,9 +57,13 @@ export default function HomePage() {
 
       if (response.status === 401) {
         window.localStorage.removeItem('accessToken');
+        setSummary(null);
         throw new Error('La sesión ha expirado. Vuelve a iniciar sesión.');
       }
-      if (!response.ok) throw new Error('No se pudo cargar el resumen de seguridad.');
+
+      if (!response.ok) {
+        throw new Error('No se pudo cargar el resumen de seguridad.');
+      }
 
       setSummary(await response.json());
       setError(null);
@@ -71,6 +78,57 @@ export default function HomePage() {
     void loadSummary();
   }, [loadSummary]);
 
+  const handleLogin = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setAuthLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`${API_URL}/api/v1/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload.message ?? 'No se pudo iniciar sesión.');
+      }
+
+      if (payload.token) {
+        window.localStorage.setItem('accessToken', payload.token);
+        await loadSummary();
+      } else {
+        setError('Se requiere verificación MFA para continuar.');
+      }
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Error al iniciar sesión.');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    const token = window.localStorage.getItem('accessToken');
+    if (!token) {
+      setSummary(null);
+      return;
+    }
+
+    try {
+      await fetch(`${API_URL}/api/v1/auth/logout`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } finally {
+      window.localStorage.removeItem('accessToken');
+      setSummary(null);
+      setError(null);
+      setLoading(false);
+    }
+  };
+
   const resolveEvent = async (eventId: string) => {
     const token = window.localStorage.getItem('accessToken');
     if (!token) return;
@@ -82,6 +140,39 @@ export default function HomePage() {
     await loadSummary();
   };
 
+  if (!summary && !loading) {
+    return (
+      <main className="auth-shell">
+        <div className="auth-card">
+          <p className="eyebrow">Protection dashboard</p>
+          <h1>{APP_NAME}</h1>
+          <p className="muted">Inicia sesión para ver el estado de seguridad de tu cuenta.</p>
+
+          <form onSubmit={handleLogin} className="auth-form">
+            <input
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="correo@ejemplo.com"
+              required
+            />
+            <input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="Contraseña"
+              required
+            />
+            {error && <div className="error-panel">{error}</div>}
+            <button type="submit" disabled={authLoading}>
+              {authLoading ? 'Entrando…' : 'Iniciar sesión'}
+            </button>
+          </form>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="dashboard-shell">
       <div className="dashboard-container">
@@ -91,7 +182,10 @@ export default function HomePage() {
             <h1>{APP_NAME}</h1>
             <p className="muted">Condiciones, eventos y sesiones de tu cuenta.</p>
           </div>
-          <button className="secondary-button" onClick={() => void loadSummary()}>Actualizar</button>
+          <div className="header-actions">
+            <button className="secondary-button" onClick={() => void loadSummary()}>Actualizar</button>
+            <button className="secondary-button danger" onClick={handleLogout}>Cerrar sesión</button>
+          </div>
         </header>
 
         {loading && <div className="panel">Cargando resumen de seguridad…</div>}
