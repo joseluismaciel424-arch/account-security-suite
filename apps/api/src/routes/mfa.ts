@@ -1,65 +1,35 @@
 import { Router } from 'express';
 import { pool } from '../db';
-import { generateMfaSecret, verifyTotpCode } from '../security/mfa';
+import { requireAuth } from '../middleware/auth';
+import { hashRecoveryCode } from '../security/auth';
+import { encryptMfaSecret, generateMfaSecret, generateRecoveryCodes, verifyTotpCode, decryptMfaSecret } from '../security/mfa';
 
 export const mfaRouter = Router();
+mfaRouter.use(requireAuth);
 
 mfaRouter.post('/setup', async (req, res) => {
-  const userId = req.body?.userId;
-
-  if (!userId) {
-    return res.status(400).json({ message: 'User ID is required.' });
-  }
-
-  const user = await pool.query('SELECT id FROM users WHERE id = $1', [userId]);
-  if (!user.rowCount || user.rowCount === 0) {
-    return res.status(404).json({ message: 'User not found.' });
-  }
-
   const secret = generateMfaSecret();
-
-  await pool.query(
-    `UPDATE users SET mfa_secret = $1, mfa_enabled = true, updated_at = NOW() WHERE id = $2`,
-    [secret, userId],
-  );
-
-  return res.status(200).json({
-    secret,
-    otpAuthUrl: `otpauth://totp/AccountSecuritySuite:${userId}?secret=${secret}&issuer=AccountSecuritySuite`,
-    message: 'MFA setup initialized. Store this secret securely and validate the TOTP code.',
-  });
+  await pool.query('UPDATE users SET mfa_secret_encrypted = $1, mfa_enabled = false, updated_at = NOW() WHERE id = $2', [encryptMfaSecret(secret), req.user!.id]);
+  return res.json({ secret, otpAuthUrl: `otpauth://totp/AccountSecuritySuite:${req.user!.id}?secret=${secret}&issuer=AccountSecuritySuite`, message: 'Registra el secreto en tu autenticador y confirma un código.' });
 });
 
-mfaRouter.post('/verify', async (req, res) => {
-  const { userId, code } = req.body ?? {};
+mfaRouter.post('/enable', async (req, res) => {
+  const code = String(req.body?.code ?? '');
+  const result = await pool.query('SELECT mfa_secret_encrypted FROM users WHERE id = $1', [req.user!.id]);
+  if (!result.rowCount || !result.rows[0].mfa_secret_encrypted) return res.status(400).json({ message: 'MFA setup is not pending.' });
+  if (!verifyTotpCode(decryptMfaSecret(result.rows[0].mfa_secret_encrypted), code)) return res.status(400).json({ message: 'Invalid MFA code.' });
 
-  if (!userId || !code) {
-    return res.status(400).json({ message: 'User ID and code are required.' });
-  }
+  const recoveryCodes = generateRecoveryCodes();
+  const hashes = await Promise.all(recoveryCodes.map(hashRecoveryCode));
+  await pool.query('UPDATE users SET mfa_enabled = true, recovery_codes_hashes = $1::jsonb, mfa_failed_attempts = 0, mfa_locked_until = NULL, updated_at = NOW() WHERE id = $2', [JSON.stringify(hashes), req.user!.id]);
+  return res.json({ enabled: true, recoveryCodes, message: 'MFA enabled. Store recovery codes securely; they will not be shown again.' });
+});
 
-  const userResult = await pool.query(
-    'SELECT id, mfa_secret, mfa_enabled FROM users WHERE id = $1',
-    [userId],
-  );
-
-  if (!userResult.rowCount || userResult.rowCount === 0) {
-    return res.status(404).json({ message: 'User not found.' });
-  }
-
-  const user = userResult.rows[0];
-
-  if (!user.mfa_enabled || !user.mfa_secret) {
-    return res.status(400).json({ message: 'MFA is not configured for this user.' });
-  }
-
-  const valid = verifyTotpCode(user.mfa_secret, String(code));
-
-  if (!valid) {
-    return res.status(400).json({ valid: false, message: 'Invalid MFA code.' });
-  }
-
-  return res.status(200).json({
-    valid: true,
-    message: 'MFA verification successful.',
-  });
+mfaRouter.post('/disable', async (req, res) => {
+  const code = String(req.body?.code ?? '');
+  const result = await pool.query('SELECT mfa_secret_encrypted FROM users WHERE id = $1', [req.user!.id]);
+  if (!result.rowCount || !result.rows[0].mfa_secret_encrypted) return res.status(400).json({ message: 'MFA is not configured.' });
+  if (!verifyTotpCode(decryptMfaSecret(result.rows[0].mfa_secret_encrypted), code)) return res.status(400).json({ message: 'Invalid MFA code.' });
+  await pool.query('UPDATE users SET mfa_enabled = false, mfa_secret_encrypted = NULL, recovery_codes_hashes = \'[]\'::jsonb, updated_at = NOW() WHERE id = $1', [req.user!.id]);
+  return res.json({ disabled: true });
 });
