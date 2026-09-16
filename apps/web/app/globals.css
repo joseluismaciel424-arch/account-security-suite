@@ -3,13 +3,35 @@ html, body {
   padding: 0;
   min-height: 100%;
   background: #0b1020;
+  color: #e5eefb;
+  font-family: Arial, sans-serif;
 }
 
-* {
-  box-sizing: border-box;
-}
-
-a {
-  color: inherit;
-  text-decoration: none;
-}
+* { box-sizing: border-box; }
+button { cursor: pointer; }
+.dashboard-shell { min-height: 100vh; padding: 2rem 1rem; }
+.dashboard-container { max-width: 1100px; margin: auto; }
+.dashboard-header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-bottom: 2rem; }
+h1 { margin: .3rem 0; font-size: clamp(2rem, 5vw, 3.1rem); }
+h2 { margin-top: 0; }
+.eyebrow { color: #8ab4f8; text-transform: uppercase; letter-spacing: .12em; font-size: .75rem; }
+.muted { color: #9fb4d1; }
+.metric-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1rem; }
+.metric, .panel { background: #101827; border: 1px solid #26344d; border-radius: 14px; padding: 1rem; }
+.metric span { display: block; color: #9fb4d1; font-size: .8rem; }
+.metric strong { display: block; margin-top: .5rem; font-size: 1.6rem; text-transform: capitalize; }
+.content-grid { display: grid; grid-template-columns: 1fr 2fr; gap: 1rem; margin-bottom: 1rem; }
+.factor-list, .event-list, .session-list { display: grid; gap: .75rem; }
+.factor, .session { display: flex; justify-content: space-between; gap: .75rem; padding: .8rem; background: #142033; border-radius: 10px; }
+.event { display: flex; justify-content: space-between; gap: 1rem; padding: .8rem; background: #142033; border-radius: 10px; }
+.event p { margin: .35rem 0; color: #c3d2e8; }
+.event small, .session span { color: #9fb4d1; font-size: .8rem; }
+.event-actions { display: flex; flex-direction: column; align-items: flex-end; gap: .5rem; }
+.severity { font-size: .75rem; text-transform: uppercase; font-weight: 700; }
+.severity.high, .severity.critical, .warning { color: #fbbf24; }
+.severity.medium { color: #f59e0b; }
+.severity.low, .ok { color: #4ade80; }
+.secondary-button, .link-button { border: 0; border-radius: 8px; padding: .65rem .9rem; background: #1d4ed8; color: white; font-weight: 600; }
+.link-button { background: transparent; color: #8ab4f8; padding: 0; }
+.error-panel { border-color: #b45309; color: #fcd34d; margin-bottom: 1rem; }
+@media (max-width: 750px) { .content-grid { grid-template-columns: 1fr; } .dashboard-header, .event, .factor, .session { align-items: flex-start; flex-direction: column; } .event-actions { align-items: flex-start; } }

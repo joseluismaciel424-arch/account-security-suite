@@ -1,70 +1,170 @@
+'use client';
+
+import { useCallback, useEffect, useState } from 'react';
 import { APP_NAME } from '@account-security-suite/shared';
 
-const summary = [
-  { label: 'Security score', value: '91/100' },
-  { label: 'Accounts monitored', value: '12' },
-  { label: 'Alerts', value: '3 pending' },
-  { label: 'MFA enabled', value: '10/12' },
-];
+type SecurityEvent = {
+  id: string;
+  event_type: string;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  title: string;
+  description: string;
+  created_at: string;
+  resolved: boolean;
+};
 
-const accounts = [
-  { name: 'Google', status: 'Secure', risk: 'Low', lastSeen: '2 min ago' },
-  { name: 'GitHub', status: 'Needs attention', risk: 'Medium', lastSeen: '15 min ago' },
-  { name: 'Microsoft', status: 'Secure', risk: 'Low', lastSeen: '1 hour ago' },
-];
+type SecuritySummary = {
+  status: 'secure' | 'needs-attention' | 'critical';
+  score: number;
+  mfaEnabled: boolean;
+  recoveryEmailConfigured: boolean;
+  unresolvedEventCount: number;
+  activeSessionCount: number;
+  events: SecurityEvent[];
+  sessions: Array<{
+    id: string;
+    device_name: string | null;
+    user_agent: string | null;
+    ip_address: string | null;
+    mfa_verified: boolean;
+    last_seen_at: string;
+  }>;
+};
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
 export default function HomePage() {
+  const [summary, setSummary] = useState<SecuritySummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadSummary = useCallback(async () => {
+    const token = window.localStorage.getItem('accessToken');
+    if (!token) {
+      setError('Inicia sesión para consultar el estado de seguridad de tu cuenta.');
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/api/v1/security/summary`, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
+      });
+
+      if (response.status === 401) {
+        window.localStorage.removeItem('accessToken');
+        throw new Error('La sesión ha expirado. Vuelve a iniciar sesión.');
+      }
+      if (!response.ok) throw new Error('No se pudo cargar el resumen de seguridad.');
+
+      setSummary(await response.json());
+      setError(null);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Error de conexión.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadSummary();
+  }, [loadSummary]);
+
+  const resolveEvent = async (eventId: string) => {
+    const token = window.localStorage.getItem('accessToken');
+    if (!token) return;
+
+    await fetch(`${API_URL}/api/v1/security/events/${eventId}/resolve`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    await loadSummary();
+  };
+
   return (
-    <main style={{ padding: '2rem', fontFamily: 'sans-serif', background: '#0b1020', color: '#e5eefb', minHeight: '100vh' }}>
-      <div style={{ maxWidth: 1100, margin: '0 auto' }}>
-        <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+    <main className="dashboard-shell">
+      <div className="dashboard-container">
+        <header className="dashboard-header">
           <div>
-            <p style={{ margin: 0, color: '#8ab4f8', textTransform: 'uppercase', letterSpacing: '0.12em', fontSize: 12 }}>Protection dashboard</p>
-            <h1 style={{ margin: '0.4rem 0 0', fontSize: '2.5rem' }}>{APP_NAME}</h1>
+            <p className="eyebrow">Protection dashboard</p>
+            <h1>{APP_NAME}</h1>
+            <p className="muted">Condiciones, eventos y sesiones de tu cuenta.</p>
           </div>
-          <button style={{ background: '#1d4ed8', color: 'white', border: 'none', borderRadius: 8, padding: '0.8rem 1.2rem', fontWeight: 600 }}>
-            Review security
-          </button>
+          <button className="secondary-button" onClick={() => void loadSummary()}>Actualizar</button>
         </header>
 
-        <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem', marginBottom: '2rem' }}>
-          {summary.map((item) => (
-            <div key={item.label} style={{ background: '#101827', border: '1px solid #1f2a3d', borderRadius: 14, padding: '1rem' }}>
-              <div style={{ fontSize: 12, color: '#9fb4d1' }}>{item.label}</div>
-              <div style={{ fontSize: '1.8rem', fontWeight: 700, marginTop: '0.6rem' }}>{item.value}</div>
-            </div>
-          ))}
-        </section>
+        {loading && <div className="panel">Cargando resumen de seguridad…</div>}
+        {error && <div className="panel error-panel">{error}</div>}
 
-        <section style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1rem' }}>
-          <div style={{ background: '#101827', border: '1px solid #1f2a3d', borderRadius: 14, padding: '1rem' }}>
-            <h2 style={{ marginTop: 0 }}>Accounts monitored</h2>
-            <div style={{ display: 'grid', gap: '0.8rem' }}>
-              {accounts.map((account) => (
-                <div key={account.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #243047', paddingBottom: '0.7rem' }}>
-                  <div>
-                    <div style={{ fontWeight: 700 }}>{account.name}</div>
-                    <div style={{ color: '#9fb4d1', fontSize: 12 }}>Last seen {account.lastSeen}</div>
-                  </div>
-                  <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center' }}>
-                    <span style={{ color: account.risk === 'Medium' ? '#fbbf24' : '#4ade80', fontWeight: 600 }}>{account.risk}</span>
-                    <span style={{ background: '#15263d', borderRadius: 999, padding: '0.4rem 0.75rem', color: '#d9e7ff', fontSize: 12 }}>{account.status}</span>
-                  </div>
+        {summary && (
+          <>
+            <section className="metric-grid">
+              <Metric label="Estado" value={summary.status} />
+              <Metric label="Puntuación" value={`${summary.score}/100`} />
+              <Metric label="Eventos pendientes" value={String(summary.unresolvedEventCount)} />
+              <Metric label="Sesiones activas" value={String(summary.activeSessionCount)} />
+            </section>
+
+            <section className="content-grid">
+              <div className="panel">
+                <h2>Factores de seguridad</h2>
+                <div className="factor-list">
+                  <Factor label="MFA" enabled={summary.mfaEnabled} />
+                  <Factor label="Correo de recuperación" enabled={summary.recoveryEmailConfigured} />
+                  <Factor label="Monitoreo de sesiones" enabled={summary.activeSessionCount > 0} />
                 </div>
-              ))}
-            </div>
-          </div>
+              </div>
 
-          <div style={{ background: '#101827', border: '1px solid #1f2a3d', borderRadius: 14, padding: '1rem' }}>
-            <h2 style={{ marginTop: 0 }}>Security alerts</h2>
-            <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: '0.8rem' }}>
-              <li style={{ background: '#142033', borderRadius: 10, padding: '0.8rem' }}><strong>New sign-in</strong><br />Detected from a new device on GitHub</li>
-              <li style={{ background: '#142033', borderRadius: 10, padding: '0.8rem' }}><strong>Recovery update</strong><br />One account has an unverified recovery email</li>
-              <li style={{ background: '#142033', borderRadius: 10, padding: '0.8rem' }}><strong>Breached email</strong><br />Your email was found in a public leak database</li>
-            </ul>
-          </div>
-        </section>
+              <div className="panel">
+                <h2>Eventos recientes</h2>
+                {summary.events.length === 0 ? (
+                  <p className="muted">No hay eventos pendientes.</p>
+                ) : (
+                  <div className="event-list">
+                    {summary.events.map((event) => (
+                      <article className="event" key={event.id}>
+                        <div>
+                          <strong>{event.title}</strong>
+                          <p>{event.description}</p>
+                          <small>{new Date(event.created_at).toLocaleString()}</small>
+                        </div>
+                        <div className="event-actions">
+                          <span className={`severity ${event.severity}`}>{event.severity}</span>
+                          <button className="link-button" onClick={() => void resolveEvent(event.id)}>Marcar revisado</button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </section>
+
+            <section className="panel">
+              <h2>Sesiones activas</h2>
+              {summary.sessions.length === 0 ? <p className="muted">No hay sesiones activas.</p> : (
+                <div className="session-list">
+                  {summary.sessions.map((session) => (
+                    <div className="session" key={session.id}>
+                      <strong>{session.device_name || 'Dispositivo sin nombre'}</strong>
+                      <span>{session.ip_address || 'IP no disponible'} · Última actividad {new Date(session.last_seen_at).toLocaleString()}</span>
+                      <span className={session.mfa_verified ? 'ok' : 'warning'}>{session.mfa_verified ? 'MFA verificado' : 'MFA no verificado'}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          </>
+        )}
       </div>
     </main>
   );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return <div className="metric"><span>{label}</span><strong>{value}</strong></div>;
+}
+
+function Factor({ label, enabled }: { label: string; enabled: boolean }) {
+  return <div className="factor"><span>{label}</span><span className={enabled ? 'ok' : 'warning'}>{enabled ? 'Activo' : 'Pendiente'}</span></div>;
 }
