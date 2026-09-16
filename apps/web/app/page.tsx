@@ -39,6 +39,8 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [mfaCode, setMfaCode] = useState('');
+  const [challengeToken, setChallengeToken] = useState<string | null>(null);
   const [authLoading, setAuthLoading] = useState(false);
 
   const loadSummary = useCallback(async () => {
@@ -60,10 +62,7 @@ export default function HomePage() {
         setSummary(null);
         throw new Error('La sesión ha expirado. Vuelve a iniciar sesión.');
       }
-
-      if (!response.ok) {
-        throw new Error('No se pudo cargar el resumen de seguridad.');
-      }
+      if (!response.ok) throw new Error('No se pudo cargar el resumen de seguridad.');
 
       setSummary(await response.json());
       setError(null);
@@ -86,27 +85,64 @@ export default function HomePage() {
     try {
       const response = await fetch(`${API_URL}/api/v1/auth/login`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Device-Name': 'Web browser' },
         body: JSON.stringify({ email, password }),
       });
-
       const payload = await response.json();
 
-      if (!response.ok) {
+      if (!response.ok && response.status !== 202) {
         throw new Error(payload.message ?? 'No se pudo iniciar sesión.');
       }
 
-      if (payload.token) {
-        window.localStorage.setItem('accessToken', payload.token);
-        await loadSummary();
-      } else {
-        setError('Se requiere verificación MFA para continuar.');
+      if (payload.requiresMfa && payload.challengeToken) {
+        setChallengeToken(payload.challengeToken);
+        setMfaCode('');
+        return;
       }
+
+      if (!payload.token) throw new Error('La respuesta de autenticación no contiene una sesión válida.');
+      window.localStorage.setItem('accessToken', payload.token);
+      await loadSummary();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Error al iniciar sesión.');
     } finally {
       setAuthLoading(false);
     }
+  };
+
+  const handleMfaVerification = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!challengeToken) return;
+
+    setAuthLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`${API_URL}/api/v1/auth/mfa/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Device-Name': 'Web browser' },
+        body: JSON.stringify({ challengeToken, code: mfaCode }),
+      });
+      const payload = await response.json();
+
+      if (!response.ok) throw new Error(payload.message ?? 'No se pudo verificar el código MFA.');
+      if (!payload.token) throw new Error('La verificación MFA no devolvió una sesión válida.');
+
+      window.localStorage.setItem('accessToken', payload.token);
+      setChallengeToken(null);
+      setMfaCode('');
+      await loadSummary();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Error al verificar MFA.');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const cancelMfa = () => {
+    setChallengeToken(null);
+    setMfaCode('');
+    setError(null);
   };
 
   const handleLogout = async () => {
@@ -146,28 +182,47 @@ export default function HomePage() {
         <div className="auth-card">
           <p className="eyebrow">Protection dashboard</p>
           <h1>{APP_NAME}</h1>
-          <p className="muted">Inicia sesión para ver el estado de seguridad de tu cuenta.</p>
-
-          <form onSubmit={handleLogin} className="auth-form">
-            <input
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="correo@ejemplo.com"
-              required
-            />
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder="Contraseña"
-              required
-            />
-            {error && <div className="error-panel">{error}</div>}
-            <button type="submit" disabled={authLoading}>
-              {authLoading ? 'Entrando…' : 'Iniciar sesión'}
-            </button>
-          </form>
+          {challengeToken ? (
+            <>
+              <h2>Verificación MFA</h2>
+              <p className="muted">Introduce el código de seis dígitos de tu aplicación autenticadora.</p>
+              <form onSubmit={handleMfaVerification} className="auth-form">
+                <label htmlFor="mfa-code">Código temporal</label>
+                <input
+                  id="mfa-code"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  pattern="[0-9]{6}"
+                  maxLength={6}
+                  value={mfaCode}
+                  onChange={(event) => setMfaCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="000000"
+                  required
+                  autoFocus
+                />
+                {error && <div className="error-panel">{error}</div>}
+                <button type="submit" disabled={authLoading || mfaCode.length !== 6}>
+                  {authLoading ? 'Verificando…' : 'Verificar código'}
+                </button>
+                <button type="button" className="link-button" onClick={cancelMfa}>Volver al inicio de sesión</button>
+              </form>
+            </>
+          ) : (
+            <>
+              <p className="muted">Inicia sesión para ver el estado de seguridad de tu cuenta.</p>
+              <form onSubmit={handleLogin} className="auth-form">
+                <label htmlFor="email">Correo electrónico</label>
+                <input id="email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="correo@ejemplo.com" autoComplete="email" required />
+                <label htmlFor="password">Contraseña</label>
+                <input id="password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Contraseña" autoComplete="current-password" required />
+                {error && <div className="error-panel">{error}</div>}
+                <button type="submit" disabled={authLoading}>
+                  {authLoading ? 'Entrando…' : 'Iniciar sesión'}
+                </button>
+              </form>
+            </>
+          )}
         </div>
       </main>
     );
@@ -212,9 +267,7 @@ export default function HomePage() {
 
               <div className="panel">
                 <h2>Eventos recientes</h2>
-                {summary.events.length === 0 ? (
-                  <p className="muted">No hay eventos pendientes.</p>
-                ) : (
+                {summary.events.length === 0 ? <p className="muted">No hay eventos pendientes.</p> : (
                   <div className="event-list">
                     {summary.events.map((event) => (
                       <article className="event" key={event.id}>
